@@ -1,4 +1,4 @@
-param([switch]$SkipBuild)
+﻿param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 if (-not $SkipBuild) { & (Join-Path $projectRoot 'build.ps1') -Test }
