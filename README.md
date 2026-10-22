@@ -53,34 +53,49 @@ HUD и мишени пропускают клики к приложениям п
 Без сторонних пакетов, SDK и скачиваний. Используется C# и компилятор .NET Framework из Windows:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Test
 ```
 
-Перед пересборкой закрой работающий мяч через меню. Скрипт собирает `WindowBall.exe` и при необходимости создаёт `ball.ico` из того же процедурного изображения.
+Перед пересборкой закрой работающий мяч через меню. Скрипт собирает `bin/WindowBall.exe`, копирует рядом конфигурацию и при необходимости создаёт `assets/ball.ico` из того же процедурного изображения. Для запуска из исходников открой `bin/WindowBall.exe`. Отчёты проверок находятся в `artifacts/`.
 
-В PowerShell 7 можно вызвать `./build.ps1 -Test -SmokeTest`: дополнительная проверка создаёт настоящее прозрачное окно на пару секунд. CI на Windows собирает программу, выполняет проверки физики и подготавливает архив в артефактах Actions.
+В PowerShell 7 можно вызвать `./scripts/build.ps1 -Test -SmokeTest`: дополнительная проверка создаёт настоящее прозрачное окно на несколько секунд. CI на Windows собирает программу, выполняет проверки физики и подготавливает архив в артефактах Actions. Скрипты определяют корень проекта по своему расположению и работают из любой текущей папки.
 
 Проверка настоящего прозрачного окна с таймером, броском, паузой и сменой размера:
 
 ```powershell
-Start-Process .\WindowBall.exe -ArgumentList '--smoke-test smoke-results.txt' -Wait
-Get-Content .\smoke-results.txt
+Start-Process .\bin\WindowBall.exe -ArgumentList '--smoke-test artifacts/smoke-results.txt' -Wait
+Get-Content .\artifacts\smoke-results.txt
 ```
 
 Физика рассчитывается с фиксированным шагом 1/240 секунды, отрисовка идёт по таймеру примерно 60–120 раз в секунду в зависимости от планировщика Windows. Вращение использует 72 готовых кадра, а кадры передаются в небольшое [прозрачное окно Win32](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-updatelayeredwindow). Скорость броска вычисляется по последним 100 мс движения, с ограничением экстремальных жестов. В покое таймер замедляется, перерисовка не выполняется.
 
-Исходники: `Program.cs` — окно и управление, `BallPhysics.cs` — контакты и броски, `BallProfile.cs` — материалы, `BallArt.cs` — процедурные текстуры, `SportsGame.cs` — игровые правила, `BallGames.cs` — связь игры с окном, `GameOverlay.cs` — счёт и мишени, `Native.cs` — прозрачный слой и ресурсы Win32, `Settings.cs` — настройки, `SelfTests.cs` — проверки.
+## Структура репозитория
+
+| Папка | Содержимое |
+| --- | --- |
+| [src](src/README.md) | Код приложения: управление, физика, игровые правила и графика |
+| [tests](tests/README.md) | Проверки физики, игровых правил и настоящих окон |
+| [scripts](scripts/README.md) | Сборка, запуск проверок и упаковка релиза |
+| [packaging](packaging/README.md) | Манифест Windows, конфигурация и файлы переносимой программы |
+| [assets](assets/README.md) | Иконка и изображения для документации |
+| [docs](docs/README.md) | Описание физики, история изменений и тексты релизов |
+| [bin](bin/README.md) | Готовая программа, её конфигурация и локальные настройки |
+| [artifacts](artifacts/README.md) | Отчёты проверок и служебные изображения |
+| [dist](dist/README.md) | ZIP-архивы, контрольные суммы и файлы для публикации релизов |
+| [.github](.github/README.md) | Автоматическая сборка в GitHub Actions |
+
+В каждой папке есть свой README. Содержимое `bin/`, `artifacts/` и `dist/` генерируется локально и не коммитится, кроме описаний папок.
 
 ## Подготовка релиза
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\package-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
 ```
 
 В `dist/v1.1.0/` появятся готовый ZIP, `SHA256SUMS.txt` и `RELEASE_NOTES.md`. В архив попадают только программа, конфигурация, инструкция, запускатель, лицензия и история изменений. Личные настройки, журналы и отчёты тестов не включаются.
 
 Создание тега и релиза выполняется вручную на GitHub: выбери `main`, тег `v1.1.0`, вставь текст из `RELEASE_NOTES.md` и приложи ZIP и `SHA256SUMS.txt`. Скрипт и CI подготавливают файлы, не публикуя релиз.
 
-Версия задаётся в `Properties/AssemblyInfo.cs`; перед новым выпуском обнови её, `CHANGELOG.md` и соответствующий файл в `docs/releases/`.
+Версия задаётся в `src/Properties/AssemblyInfo.cs`; перед новым выпуском обнови её, `docs/CHANGELOG.md` и соответствующий файл в `docs/releases/`.
 
 Лицензия: [MIT](LICENSE). Автор: [marsik641](https://github.com/marsik641).
