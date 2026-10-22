@@ -1,0 +1,13 @@
+WindowBall.exe
+test-results.txt
+smoke-results.txt
+preview.png
+*.pdb
+WindowBall.settings.json
+error.log
+dist/
+.vs/
+bin/
+obj/
+*.user
+*.suo

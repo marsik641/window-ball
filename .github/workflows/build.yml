@@ -1,0 +1,39 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and test
+        shell: pwsh
+        run: ./build.ps1 -Test
+      - name: Prepare portable archive
+        shell: pwsh
+        run: ./package-release.ps1 -SkipBuild
+      - name: Upload release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: WindowBall-portable
+          path: |
+            dist/**/*.zip
+            dist/**/SHA256SUMS.txt
+            dist/**/RELEASE_NOTES.md
+          if-no-files-found: error
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: test-results.txt
+          if-no-files-found: ignore
