@@ -1,4 +1,4 @@
-param([switch]$Test, [switch]$SmokeTest)
+﻿param([switch]$Test, [switch]$SmokeTest)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $compilerPath = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -6,7 +6,7 @@ if (-not (Test-Path -LiteralPath $compilerPath)) {
     $compilerPath = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
 }
 if (-not (Test-Path -LiteralPath $compilerPath)) { throw '.NET Framework 4.8 compiler not found.' }
-$sources = @('Program.cs', 'Native.cs', 'BallArt.cs', 'BallPhysics.cs', 'Settings.cs', 'SelfTests.cs', 'Properties\AssemblyInfo.cs') | ForEach-Object { Join-Path $projectRoot $_ }
+$sources = @('Program.cs', 'Native.cs', 'BallArt.cs', 'BallPhysics.cs', 'BallProfile.cs', 'SportsGame.cs', 'GameOverlay.cs', 'BallGames.cs', 'Settings.cs', 'SelfTests.cs', 'Properties\AssemblyInfo.cs') | ForEach-Object { Join-Path $projectRoot $_ }
 $output = Join-Path $projectRoot 'WindowBall.exe'
 $common = @('/nologo', '/target:winexe', '/platform:anycpu', '/optimize+', '/utf8output', '/codepage:65001', '/warnaserror+', '/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Runtime.Serialization.dll', "/win32manifest:$(Join-Path $projectRoot 'app.manifest')", "/out:$output")
 $iconPath = Join-Path $projectRoot 'ball.ico'

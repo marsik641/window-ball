@@ -22,6 +22,18 @@ namespace WindowBall
                 using (Bitmap image = BallArt.Render(320, 20, -22)) image.Save(args[1]);
                 return 0;
             }
+            if (args.Length > 1 && args[0] == "--render-gallery")
+            {
+                using (Bitmap image = GameArt.Gallery()) image.Save(args[1]);
+                return 0;
+            }
+            if (args.Length > 1 && args[0] == "--render-hud-preview")
+            {
+                SportsGame game = new SportsGame(); game.Start(BallSkin.Football, new Rectangle(0, 0, 1920, 1080), 1);
+                game.Waiting = false; game.Score = 3; game.Elapsed = 12; game.Message = "Прямой пас в движущуюся зону";
+                using (Bitmap image = GameArt.Hud(game, 4, false)) image.Save(args[1]);
+                return 0;
+            }
             if (args.Length > 1 && args[0] == "--make-icon")
             {
                 using (Bitmap image = BallArt.Render(48, 2, -22))
@@ -55,7 +67,7 @@ namespace WindowBall
         }
     }
 
-    internal sealed class BallForm : Form
+    internal sealed partial class BallForm : Form
     {
         internal readonly BallPhysics Ball = new BallPhysics();
         private readonly Settings settings;
@@ -85,13 +97,13 @@ namespace WindowBall
             Cursor = Cursors.Hand;
             SetStyle(ControlStyles.Opaque, true);
             using (Graphics graphics = Graphics.FromHwnd(IntPtr.Zero)) scale = graphics.DpiX / 96.0;
-            Ball.Scale = scale; Ball.Restitution = settings.Bounce; Ball.Gravity = settings.Gravity;
+            Ball.Scale = scale; Ball.Restitution = settings.Bounce; Ball.Gravity = settings.Gravity; Ball.Profile = BallProfile.For(settings.Skin);
             SetDiameter(settings.Diameter);
             ResetBall();
             BuildMenu();
             menu.Opening += delegate { menuOpen = true; WakeTimer(); };
             menu.Closed += delegate { menuOpen = false; WakeTimer(); };
-            using (Bitmap image = BallArt.Render(32, 2, -22))
+            using (Bitmap image = BallArt.Render(32, 2, -22, settings.Skin))
             {
                 IntPtr handle = image.GetHicon();
                 try { trayIcon = (Icon)Icon.FromHandle(handle).Clone(); }
@@ -143,17 +155,18 @@ namespace WindowBall
 
         internal void ResetBall()
         {
+            StopGame();
             dragging = false; Capture = false; paused = false;
             Ball.Arena = ArenaAt(Cursor.Position);
             Ball.X = Ball.Arena.Right - Math.Min(Ball.Arena.Width * .25, 240 * scale);
             Ball.Y = Ball.Arena.Top + Math.Min(Ball.Arena.Height * .20, 160 * scale);
-            Ball.VX = -180 * scale; Ball.VY = 0; Ball.Spin = -95; Ball.Sleeping = false;
+            Ball.VX = -180 * scale; Ball.VY = 0; Ball.Spin = -95; Ball.Wake();
             Ball.ClampToArena(); WakeTimer();
         }
 
         internal void SetDiameter(int diameter)
         {
-            SpriteSet replacement = new SpriteSet(Math.Max(28, (int)Math.Round(diameter * scale)));
+            SpriteSet replacement = new SpriteSet(Math.Max(28, (int)Math.Round(diameter * scale * Ball.Profile.Size)), settings.Skin);
             if (sprites != null) sprites.Dispose();
             sprites = replacement;
             settings.Diameter = diameter;
@@ -170,14 +183,24 @@ namespace WindowBall
             double now = clock.Elapsed.TotalSeconds;
             double dt = Math.Min(.05, Math.Max(0, now - lastTick)); lastTick = now;
             if (dragging) MoveGrab(Cursor.Position, now);
-            else if (!paused && !menuOpen)
+            if (!paused && !menuOpen)
             {
                 accumulator += dt;
                 const double step = 1.0 / 240;
-                while (accumulator >= step) { Ball.Step(step); accumulator -= step; }
+                while (accumulator >= step)
+                {
+                    double oldX = Ball.X, oldY = Ball.Y;
+                    bool moving = !dragging && !Game.Waiting;
+                    if (moving) Ball.Step(step);
+                    else Ball.Contacts = Contact.None;
+                    Game.Advance(step, oldX, oldY, Ball, moving);
+                    if (Game.NeedsServe) { Game.NeedsServe = false; PlaceServe(); }
+                    accumulator -= step;
+                }
             }
             Present();
-            SetTimerRate(dragging || (!paused && !menuOpen && !Ball.Sleeping));
+            UpdateGameOverlays(now);
+            SetTimerRate(dragging || (!paused && !menuOpen && ((!Ball.Sleeping && !Game.Waiting) || (Game.Active && !Game.Waiting))));
         }
 
         private void Present()
@@ -205,9 +228,10 @@ namespace WindowBall
 
         internal void BeginGrab(Point cursor, double time)
         {
+            Game.CancelShot();
             dragging = true; Capture = true;
             offsetX = cursor.X - Ball.X; offsetY = cursor.Y - Ball.Y;
-            Ball.VX = Ball.VY = Ball.Spin = 0; Ball.Sleeping = false;
+            Ball.VX = Ball.VY = Ball.Spin = 0; Ball.Wake();
             throws.Clear(); throws.Add(time, cursor.X, cursor.Y);
             WakeTimer();
         }
@@ -228,16 +252,21 @@ namespace WindowBall
             PointF velocity = throws.Velocity(scale);
             dragging = false; Capture = false;
             Ball.Arena = ArenaAt(new Point((int)Ball.X, (int)Ball.Y));
+            if (Game.Visible && Ball.Arena != Game.Arena) StopGame();
             Ball.ClampToArena();
             Ball.VX = velocity.X; Ball.VY = velocity.Y;
             Ball.Spin = BallArt.Clamp(velocity.X / Ball.Radius * 70, -1200, 1200);
-            Ball.Sleeping = false; WakeTimer();
+            Ball.Wake(); Game.Release(Ball); WakeTimer();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left) BeginGrab(Cursor.Position, clock.Elapsed.TotalSeconds);
+            if (e.Button == MouseButtons.Left)
+            {
+                if (Game.Active && Game.TapGame) { if (!paused) Game.Tap(Ball); WakeTimer(); }
+                else BeginGrab(Cursor.Position, clock.Elapsed.TotalSeconds);
+            }
         }
         protected override void OnMouseMove(MouseEventArgs e)
         {
@@ -257,15 +286,15 @@ namespace WindowBall
             {
                 dragging = false; Ball.VX = Ball.VY = 0;
                 Ball.Arena = ArenaAt(new Point((int)Ball.X, (int)Ball.Y));
-                Ball.ClampToArena(); Ball.Sleeping = false; WakeTimer();
+                Ball.ClampToArena(); Ball.Wake(); WakeTimer();
             }
         }
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
             base.OnMouseDoubleClick(e);
-            if (e.Button != MouseButtons.Left) return;
+            if (e.Button != MouseButtons.Left || Game.Active) return;
             dragging = false; Capture = false; paused = false;
-            Ball.VY = -900 * scale; Ball.VX = 170 * scale; Ball.Spin = 280; Ball.Sleeping = false;
+            Ball.VY = -900 * scale; Ball.VX = 170 * scale; Ball.Spin = 280; Ball.Wake();
             WakeTimer();
         }
 
@@ -276,7 +305,9 @@ namespace WindowBall
             menu.Font = new Font("Segoe UI", 10);
             ToolStripMenuItem title = new ToolStripMenuItem("WINDOW BALL  /  настольный мяч") { Enabled = false };
             menu.Items.Add(title);
-            menu.Items.Add("Подбросить", null, delegate { paused = false; Ball.VY = -1050 * scale; Ball.VX = 200 * scale; Ball.Spin = 320; Ball.Sleeping = false; WakeTimer(); });
+            AddGameMenu();
+            ToolStripItem toss = menu.Items.Add("Подбросить", null, delegate { paused = false; Ball.VY = -1050 * scale; Ball.VX = 200 * scale; Ball.Spin = 320; Ball.Wake(); WakeTimer(); });
+            menu.Opening += delegate { toss.Enabled = !Game.Active; };
             menu.Items.Add("Вернуть мяч на экран", null, delegate { ResetBall(); });
             ToolStripMenuItem pause = new ToolStripMenuItem("Пауза");
             pause.Click += delegate { TogglePause(); };
@@ -294,8 +325,9 @@ namespace WindowBall
             ToolStripMenuItem taskbar = new ToolStripMenuItem("Пол над панелью задач") { CheckOnClick = true, Checked = settings.AboveTaskbar };
             taskbar.Click += delegate { settings.AboveTaskbar = taskbar.Checked; RefreshArena(); settings.Save(); };
             menu.Items.Add(taskbar);
+            menu.Opening += delegate { sizes.Enabled = bounce.Enabled = gravity.Enabled = taskbar.Enabled = !Game.Active; };
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Как играть", null, delegate { MessageBox.Show("Левая кнопка — схватить и бросить.\nЧем резче движение, тем сильнее бросок.\nДвойной щелчок — подбросить.\nПравая кнопка — это меню.\n\nПеретащи мяч на другой монитор, чтобы играть там.\nЗначок мяча в трее — настройки и возврат мяча.", "Window Ball", MessageBoxButtons.OK, MessageBoxIcon.Information); });
+            menu.Items.Add("Как играть", null, delegate { MessageBox.Show("В обычном режиме: схвати мяч левой кнопкой и брось.\nДвойной щелчок — подбросить.\n\nВыбери скин, затем «Начать игру»:\nТеннис — 10 мишеней после отскока за 60 секунд.\nБаскетбол — 20 отскоков об пол с кликом между ними.\nФутбол — 5 прямых пасов слева в зону приёма за 60 секунд.\nСокс — 20 кликов на падении без касания пола.\n\nПравая кнопка — настройки, новая игра и обычный режим.\nВ играх с кликами перетаскивание отключено.\nВ теннисе и футболе каждый зачёт требует нового броска.\nПауза и открытое меню останавливают время.", "Window Ball", MessageBoxButtons.OK, MessageBoxIcon.Information); });
             menu.Items.Add("Выход", null, delegate { Close(); });
             menu.Opening += delegate { pause.Checked = paused; };
         }
@@ -317,8 +349,9 @@ namespace WindowBall
 
         private void RefreshArena()
         {
+            StopGame();
             Ball.Arena = ArenaAt(new Point((int)Ball.X, (int)Ball.Y));
-            Ball.ClampToArena(); Ball.Sleeping = false; WakeTimer();
+            Ball.ClampToArena(); Ball.Wake(); WakeTimer();
         }
         private void DisplayChanged(object sender, EventArgs e) { ScheduleRefresh(); }
         private void PreferencesChanged(object sender, UserPreferenceChangedEventArgs e) { ScheduleRefresh(); }
@@ -337,13 +370,14 @@ namespace WindowBall
             {
                 long packed = message.LParam.ToInt64();
                 Point point = new Point(unchecked((short)(packed & 0xffff)), unchecked((short)((packed >> 16) & 0xffff)));
-                if (Math.Pow(point.X - Ball.X, 2) + Math.Pow(point.Y - Ball.Y, 2) > Ball.Radius * Ball.Radius)
+                if (!Ball.Contains(point))
                 { message.Result = new IntPtr(-1); return; }
             }
             if (message.Msg == 0x02E0)
             {
                 // Keep physical cursor coordinates; resize the sprite for the destination monitor's DPI.
                 scale = (message.WParam.ToInt64() & 0xffff) / 96.0;
+                StopGame();
                 Ball.Scale = scale;
                 SetDiameter(settings.Diameter);
                 message.Result = IntPtr.Zero; return;
@@ -362,6 +396,8 @@ namespace WindowBall
                 timer.Stop(); timer.Dispose();
                 if (precisionTimer) { Native.timeEndPeriod(1); precisionTimer = false; }
                 tray.Visible = false; tray.Dispose(); menu.Dispose();
+                if (hud != null) hud.Dispose();
+                if (targetOverlay != null) targetOverlay.Dispose();
                 if (trayIcon != null) trayIcon.Dispose();
                 if (sprites != null) sprites.Dispose();
             }

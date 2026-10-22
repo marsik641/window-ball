@@ -41,7 +41,8 @@ namespace WindowBall
         private IntPtr dc;
         internal readonly int Diameter, Padding, Extent;
 
-        internal SpriteSet(int diameter)
+        internal SpriteSet(int diameter) : this(diameter, BallSkin.Tennis) { }
+        internal SpriteSet(int diameter, BallSkin skin)
         {
             Diameter = diameter;
             Padding = Math.Max(3, diameter / 14);
@@ -53,7 +54,7 @@ namespace WindowBall
             try
             {
                 for (int i = 0; i < frames.Length; i++)
-                    using (Bitmap image = BallArt.Render(diameter, Padding, i * 360.0 / FrameCount))
+                    using (Bitmap image = BallArt.Render(diameter, Padding, i * 360.0 / FrameCount, skin))
                         frames[i] = image.GetHbitmap(Color.FromArgb(0));
             }
             catch { Dispose(); throw; }
